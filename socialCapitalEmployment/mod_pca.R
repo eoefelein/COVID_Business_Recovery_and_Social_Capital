@@ -22,8 +22,8 @@ ml_data[, c(2:21)][indx] <-
 
 mod_pca_ui <- function(id) {
   ns <- NS(id)
-  tagList(fluidPage(sidebarLayout(
-    sidebarPanel(helpText(
+  tagList(fluidPage(
+    column(5,(helpText(
       ns(
         "Principal Component Analysis compresses data features or dimensions from many to two, while preserving as much variance in the data as possible.
       This loadings plot shows how strongly each feature influences each principal component.
@@ -32,9 +32,9 @@ mod_pca_ui <- function(id) {
            A small angle indicates the features are positively correlated. A 180 degree angle indicates a negatively correlated relationship, while a right angle suggests little to no correlation.
            Finally, loadings parallel to the PC1 axis indicate influence on the first principal component, while loadings parallel to the PC2 axis suggest influence on the second principal component."
       )
-    )),
-    mainPanel(plotOutput(ns("plot_pca"))),
-  )))
+    ))),
+    column(width = 7,plotOutput(ns("plot_pca"))),
+  ))
 }
 
 mod_pca_server <- function(id)  {

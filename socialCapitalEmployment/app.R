@@ -8,6 +8,7 @@
 # 
 
 library(shiny)
+library(shinydashboard)
 library(leaflet)
 library(tidyverse)
 library(ggplot2)
@@ -21,6 +22,7 @@ library(readr)
 library(dplyr)
 library(ggfortify)
 library(ggthemes)
+library(RColorBrewer)
 library(factoextra)
 library(mlr)
 
@@ -52,7 +54,7 @@ ui <- tagList(
       "Mapping Social Capital" = "map",
       "Plotting Employment" = "ts",
       "PCA" = "pca",
-      "Predict" = "predict",
+      "Making a Move?" = "predict",
       "About" = "about"
     ),
     pageSectionImage(

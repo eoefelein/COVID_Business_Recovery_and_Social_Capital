@@ -35,11 +35,12 @@ social_indices <-
     "nonelder"
   )]
 social_indices <- pivot_longer(social_indices, cols = 3:22)
+names(social_indices)[names(social_indices) == 'name'] <- 'socialIDX'
 # merge shape file with data
-states_sf_coef <-
+states_sf_idx <-
   geo_join(counties_reproject_sf, social_indices, "GEOID", "fips_n", how =
              'inner')
-
+print(colnames(states_sf_idx))
 cut_borders <- function(x) {
   pattern <-
     "(\\(|\\[)(-*[0-9]+\\.*[0-9]*),(-*[0-9]+\\.*[0-9]*)(\\)|\\])"
@@ -57,7 +58,7 @@ mod_map_ui <- function(id) {
       shinyWidgets::radioGroupButtons(
         inputId = ns("idx"),
         label = "Metric",
-        choices = c(unique(social_indices$name)),
+        choices = c(unique(social_indices$socialIDX)),
         checkIcon = list(yes = icon("ok",
                                     lib = "glyphicon"))
       )
@@ -68,7 +69,7 @@ mod_map_ui <- function(id) {
 mod_map_server <- function(id)  {
   moduleServer(id, function(input, output, session) {
     geoDatasetInput <- reactive({
-      states_sf_coef %>% dplyr::filter(name == input$idx)
+      states_sf_idx %>% dplyr::filter(socialIDX == input$idx)
       
     })
     
@@ -100,7 +101,7 @@ mod_map_server <- function(id)  {
           )
         ) %>%
         addLegend(
-          position = "topright",
+          position = "bottomleft",
           pal = mypal,
           values = data$idx,
           title = input$idx,
