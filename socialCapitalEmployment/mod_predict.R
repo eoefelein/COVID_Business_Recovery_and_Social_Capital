@@ -1,117 +1,193 @@
-# load the data
-df <- read.csv('data/ml_predict_data.csv')
+library(sf)
+library(tigris)
+library(shiny)
+library(shinydashboard)
+library(tidyverse)
+library(leaflet)
+library(RColorBrewer)
 
-MinMaxScaling <- function(x)
-{
-  return ((x - min(x)) / (max(x) - min(x)))
-}
+# data loading and processing
+USA <- st_read(dsn = '~/Downloads/cb_2018_us_county_5m.shp')
+counties_sf <- st_as_sf(USA)
+counties_reproject_sf <-
+  st_transform(counties_sf, 4326) %>% filter(COUNTYFP < 60010)
 
-# take out non-scaled data
-perc_change <- df$avg_perc_change
-county_name <- df[, 1]
-
-final_df <- df[,3:22]
-# applying scaling column wise to X columns 3:22
-df <- as.data.frame(apply(final_df, 2, MinMaxScaling)) 
-
-# add back non-scaled data
-df$avg_perc_change <- perc_change
-rownames(df) <- county_name
+emp_rate <-
+  read_csv('data/emp_rate_pred.csv')
+emp_rate$countyfips <- sprintf("%05d", emp_rate$countyfips)
+emp_rate[, 'oct1_pred'] <- (round(emp_rate[, 'oct1_pred'], 4))
+emp_rate <- emp_rate %>%
+  unite("label",
+        countyname:oct1_pred,
+        sep = "\n",
+        remove = FALSE)
+emp_rate$row_num <- seq(744)
+states_sf_coef <-
+  geo_join(counties_reproject_sf, emp_rate, "GEOID", "countyfips", how =
+             'inner')
+states_sf_coef$coords <- st_centroid(states_sf_coef[, 'geometry'])
+xx <- unlist(states_sf_coef$coords)
+longitude <- xx[seq(1, length(xx), 2)]
+latitude <- xx[-seq(1, length(xx), 2)]
+# states_sf_coef %>%
+#   mutate(lat = unlist(map(states_sf_coef$coords,1)),
+#          lng = unlist(map(states_sf_coef$coords,2)))
+states_sf_coef$lat <- latitude
+states_sf_coef$lon <- longitude
 
 mod_predict_ui <- function(id) {
   ns <- NS(id)
-  tagList(fixedPage(fixedRow(
-    column(
-      2,
-      
-      selectizeInput(
-        inputId = ns("county"),
-        label = "Choose a county:",
-        choices = c(unique(rownames(df))),
-        multiple = FALSE,
-        selected = "Travis County, Texas",
-        options = list(create = TRUE)
+  tagList(bootstrapPage(
+    h1(("Employee Rate Data"), align = "center", class = "header shadow-dark"),
+    column(1,),
+    div(
+      tags$style(
+        type = "text/css",
+        "#all_airports {height:calc(100vh - 80px) !important;}"
+      ),
+      div(
+        style = "display:inline-block",
+        selectInput(
+          inputId = ns("FromCounty"),
+          label = "from",
+          choices = c(unique(emp_rate$countyname)),
+          selected = 'Travis County, Texas'
+        )
+      ),
+      div(
+        style = "display:inline-block",
+        selectInput(
+          inputId = ns("ToCounty"),
+          label = "to",
+          choices = c(unique(emp_rate$countyname)),
+          selected = 'San Francisco County, California'
+        )
       )
     ),
-    column(10,
-           echarts4r::echarts4rOutput(ns("predict_plot")), )
-  )))
+    column(9,),
+    fluidRow(actionButton(ns("zoomer")), "Make your Move"),
+    div(leafletOutput(ns("map"))),
+    verbatimTextOutput(ns("text"), placeholder = TRUE)
+  ))
 }
 
 mod_predict_server <- function(id)  {
   moduleServer(id, function(input, output, session) {
-    
-    countyInput <- reactive({
-      df[rownames(df) == input$county,]
+    # map
+    output$map <- renderLeaflet({
+      rwb <- brewer.pal(n = 3, name = "RdBu")
+      binpal <- colorQuantile(rwb, states_sf_coef$oct1_pred, n = 3)
       
+      leaflet(data = states_sf_coef) %>%
+        addProviderTiles("Esri.NatGeoWorldMap") %>%
+        setView(lat = 38.2393,
+                lng = -96.3795,
+                zoom = 4) %>%
+        addPolygons(
+          data = states_sf_coef,
+          color = ~ binpal(oct1_pred),
+          stroke = FALSE,
+          smoothFactor = 0.2,
+          fillOpacity = 0.8
+        ) %>%
+        addControl(html = actionButton("reset", "Reset", icon = icon("arrows-alt")),
+                   position = "topright") %>%
+        addLegend(position = "bottomleft",
+                  pal = binpal,
+                  values = emp_rate$oct1_pred)
     })
     
-    output$predict_plot <- echarts4r::renderEcharts4r({
+    map_proxy <- leafletProxy("map")
+    
+    # Show a popup at the given location
+    show_popup_on_mouseover <- function(id, lat, lng) {
+      selected_point <- emp_rate[row_num == id,]
+      content <- as.character(selected_point$label)
+      map_proxy %>%
+        addPopups(lon, lat, content)
+    }
+    
+    observeEvent(input$mymap_shape_mouseout$id, {
+      map_proxy %>% clearPopups()
+    })
+    
+    # When circle is hovered over...show a popup
+    observeEvent(input$mymap_shape_mouseover$id, {
+      pointId <- input$mymap_shape_mouseover$id
+      lat = emp_rate[emp_rate$row_num == pointId, lat]
+      lng = emp_rate[emp_rate$row_num == pointId, lon]
       
-      # take out selected county
-      df <- df[rownames(df) != input$county,]
+      map_proxy %>% addPopups(lat = lat, lng = lng, as.character(pointId))
+    })
+    
+    observeEvent(input$zoomer, {
+      # fromCounty
+      fromCountyInput <- reactive({
+        states_sf_coef %>% dplyr::filter(countyname == input$FromCounty)
+      })
+      fromData <- fromCountyInput()
+      fromCoords <- st_coordinates(st_centroid(fromData$geometry))
       
-      # create train and test data
-      indexes = createDataPartition(df$avg_perc_change, p = .85, list = F)
-      train = df[indexes, ]
-      train_x = train[, 2:21]
-      train_y = train[, 1]
+      # toCounty
+      toCountyInput <- reactive({
+        states_sf_coef %>% dplyr::filter(countyname == input$ToCounty)
+      })
+      toData <- toCountyInput()
+      toCoords <- st_coordinates(st_centroid(toData$geometry))
       
-      test = df[-indexes, ]
-      test <- rbind(test, countyInput()) # add selected county data to test
-      test_x = test[, 2:21]
-      test_y = test[, 1]
-      
-      # Run k-NN:
-      set.seed(400)
-      ctrl <- trainControl(method = "repeatedcv", repeats = 3)
-      # make prediction
-      knnFit <-
-        caret::train(
-          avg_perc_change ~ .,
-          data = train,
-          method = "knn",
-          trControl = ctrl,
-          tuneLength = 20
+      map_proxy %>%
+        setView(lng = fromCoords[1],
+                lat = fromCoords[2],
+                zoom = 10) %>%
+        addPopups(
+          fromCoords[1],
+          fromCoords[2],
+          popup = paste(
+            "County: ",
+            fromData$countyname,
+            "<br>",
+            "Employment Rate: ",
+            fromData$oct1_pred,
+            "<br>"
+          )
+        ) %>%
+        flyTo(
+          lng = toCoords[1],
+          lat = toCoords[2],
+          zoom = 10,
+          options = list(duration = 10)
+        )  %>%
+        addPopups(
+          toCoords[1],
+          toCoords[2],
+          popup = paste(
+            "County: ",
+            toData$countyname,
+            "<br>",
+            "Employment Rate: ",
+            toData$oct1_pred,
+            "<br>"
+          )
         )
-      # create data.frame from prediction data
-      prediction <-
-        data.frame("2021-09-22",
-                   input$county,
-                   predict(knnFit, newdata = countyInput()))
-      print(prediction)
-      
-      # add prediction to timeseries (ts) data
-      data <- read.csv('data/plotting_predictions.csv')
-      print(data)
-      # drop X col
-      drops <- c("X")
-      data <- data[, !(names(data) %in% drops)]
-      
-      # filter by selected county
-      selected_county_emp_ts <- data %>% filter(countyname == input$county)
-      
-      # assign colnames of selected_county_emp_ts to prediction data
-      names(prediction) <- colnames(selected_county_emp_ts)
-      # combine past ts data with predicted, future ts data
-      past_and_future_ts <- rbind(selected_county_emp_ts, prediction)
-      
-      # to plot the data, convert to date 
-      past_and_future_ts$date <- as.Date(past_and_future_ts$date)
-      # order by date
-      selected <- past_and_future_ts[order(past_and_future_ts$date),]
-      
-      ts_df <- selected %>%
-        e_charts(x = date) %>%
-        e_datazoom(show = FALSE, toolbox = FALSE) %>%
-        e_x_axis(date,
-                 axisPointer = list(show = TRUE),
-                 borderWidth = 2)
-      
-      ts_df %>% e_bar(emp_incbelowmed) %>%
-        e_legend(FALSE)
-      
+      output$text <- renderPrint({
+        if (toData$oct1_pred > fromData$oct1_pred) {
+          cat("Great Move!")
+        } else {
+          cat("I would stay put if I were you... ")
+        }
+      })
     })
     
+    observeEvent(input$reset, {
+      map_proxy %>% setView(lat = 38.2393,
+                            lng = -96.3795,
+                            zoom = 4)
+      output$text <- renderPrint({
+        cat("")
+      })
+    })
   })
 }
+# 
+# # Run the application
+# shinyApp(ui = ui, server = server)
