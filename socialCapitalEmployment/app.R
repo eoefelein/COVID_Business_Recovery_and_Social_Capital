@@ -8,6 +8,7 @@
 # 
 
 library(shiny)
+library(shinydashboard)
 library(leaflet)
 library(tidyverse)
 library(ggplot2)
@@ -21,9 +22,11 @@ library(readr)
 library(dplyr)
 library(ggfortify)
 library(ggthemes)
+library(RColorBrewer)
 library(factoextra)
 library(mlr)
 
+source("mod_home.R")
 source("mod_map.R")
 source("mod_ts.R")
 source("mod_pca.R")
@@ -31,13 +34,19 @@ source("mod_predict.R")
 
 ui <- tagList(
   pagePiling(
-    tags$head(
-      tags$style(
-        HTML(
-        '* {font-family: "Arial", font-size:32px;};'
-        )
-      )
-    ),
+    tags$head(tags$style(
+      HTML('
+
+         @import url("https://fonts.googleapis.com/css2?family=Lato:wght@300&display=swap");
+         
+         #sidebar {
+         background-color: white;
+         }
+         
+         * { 
+         font-family: "Lato";
+         }')
+    )),
     center = TRUE,
     sections.color = c(
       "#e3c9c9",
@@ -52,21 +61,14 @@ ui <- tagList(
       "Mapping Social Capital" = "map",
       "Plotting Employment" = "ts",
       "PCA" = "pca",
-      "Predict" = "predict",
+      "Making a Move?" = "predict",
       "About" = "about"
     ),
-    pageSectionImage(
+    pageSection(
       center = TRUE,
-      img = "",
       menu = "home",
-      h1((
-        "Employment & Social Capital Across the U.S."
-      ), class = "header shadow-dark"),
-      h3(
-        class = "light footer",
-        "by",
-        tags$a("eoefelein", href = "https://github.com/eoefelein", class = "link")
-      )
+      mod_home_ui("home"),
+      br(),
     ),
     pageSection(center = TRUE,
                 menu = "map",
